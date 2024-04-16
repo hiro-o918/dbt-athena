@@ -405,6 +405,10 @@ class AthenaAdapter(SQLAdapter):
         }
         partition_pg = paginator.paginate(**partition_params)
         partitions = partition_pg.build_full_result().get("Partitions")
+        LOGGER.info(
+            f"Deleting partitions for {relation}: partition params: {partition_params}: "
+            + f"partition length {len(partitions)}"
+        )
         for partition in partitions:
             self.delete_from_s3(partition["StorageDescriptor"]["Location"])
             glue_client.delete_partition(
@@ -493,7 +497,7 @@ class AthenaAdapter(SQLAdapter):
                 config=get_boto3_config(num_retries=creds.effective_num_retries),
             )
             s3_bucket = s3_resource.Bucket(bucket_name)
-            LOGGER.debug(f"Deleting table data: path='{s3_path}', bucket='{bucket_name}', prefix='{prefix}'")
+            LOGGER.info(f"Deleting table data: path='{s3_path}', bucket='{bucket_name}', prefix='{prefix}'")
             response = s3_bucket.objects.filter(Prefix=prefix).delete()
             is_all_successful = True
             for res in response:
