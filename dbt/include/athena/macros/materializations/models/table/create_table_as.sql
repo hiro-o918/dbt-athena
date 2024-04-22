@@ -6,7 +6,7 @@
 {% macro athena__create_table_as(temporary, relation, compiled_code, language='sql', skip_partitioning=false) -%}
   {%- set materialized = config.get('materialized', default='table') -%}
   {%- set external_location = config.get('external_location', default=none) -%}
-  {%- do log("Skip partitioning: " ~ skip_partitioning) -%}
+  {%- do log("Skip partitioning: " ~ skip_partitioning, info=True) -%}
   {%- set partitioned_by = config.get('partitioned_by', default=none) if not skip_partitioning else none -%}
   {%- set bucketed_by = config.get('bucketed_by', default=none) -%}
   {%- set bucket_count = config.get('bucket_count', default=none) -%}
@@ -39,6 +39,7 @@
   {%- if native_drop and table_type == 'iceberg' -%}
     {% do log('Config native_drop enabled, skipping direct S3 delete') %}
   {%- else -%}
+    {% do log('Delete s3 data when creating table' ~ relation, info=True) %}
     {% do adapter.delete_from_s3(location) %}
   {%- endif -%}
 
@@ -161,7 +162,7 @@
       {%- do drop_relation(tmp_relation) -%}
     {%- endif -%}
 
-    {%- do log('CREATE NON-PARTIONED STAGING TABLE: ' ~ tmp_relation) -%}
+    {%- do log('CREATE NON-PARTIONED STAGING TABLE: ' ~ tmp_relation, info=True) -%}
     {%- do run_query(create_table_as(temporary, tmp_relation, compiled_code, language, true)) -%}
 
     {% set partitions_batches = get_partition_batches(sql=tmp_relation, as_subquery=False) %}
@@ -212,7 +213,7 @@
           {%- set compiled_code_result = relation ~ ' as temporary relation without partitioning created' -%}
         {%- else -%}
           {%- set compiled_code_result = adapter.run_query_with_partitions_limit_catching(create_table_as(temporary, relation, compiled_code)) -%}
-          {%- do log('COMPILED CODE RESULT: ' ~ compiled_code_result) -%}
+          {%- do log('COMPILED CODE RESULT: ' ~ compiled_code_result, info=True) -%}
           {%- if compiled_code_result == 'TOO_MANY_OPEN_PARTITIONS' -%}
             {%- do create_table_as_with_partitions(temporary, relation, compiled_code, language) -%}
             {%- set compiled_code_result = relation ~ ' with many partitions created' -%}

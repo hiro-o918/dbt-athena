@@ -28,6 +28,7 @@
 
   {% set to_drop = [] %}
   {% if existing_relation is none %}
+    {% do log("incremental on existing_relation is none" ~ relation, info=True) %}
     {% set query_result = safe_create_table_as(False, target_relation, compiled_code, model_language, force_batch) -%}
     {%- if model_language == 'python' -%}
       {% call statement('create_table', language=model_language) %}
@@ -36,6 +37,7 @@
     {%- endif -%}
     {% set build_sql = "select '" ~ query_result ~ "'" -%}
   {% elif existing_relation.is_view or should_full_refresh() %}
+    {% do log("incremental on view or full refresh" ~ relation, info=True) %}
     {% do drop_relation(existing_relation) %}
     {% set query_result = safe_create_table_as(False, target_relation, compiled_code, model_language, force_batch) -%}
     {%- if model_language == 'python' -%}
@@ -45,6 +47,7 @@
     {%- endif -%}
     {% set build_sql = "select '" ~ query_result ~ "'" -%}
   {% elif partitioned_by is not none and strategy == 'insert_overwrite' %}
+    {% do log("incremental on partitioned_by and strategy is insert_overwrite" ~ relation, info=True) %}
     {% if old_tmp_relation is not none %}
       {% do drop_relation(old_tmp_relation) %}
     {% endif %}
@@ -61,6 +64,7 @@
     %}
     {% do to_drop.append(tmp_relation) %}
   {% elif strategy == 'append' %}
+    {% do log("append strategy" ~ relation, info=True) %}
     {% if old_tmp_relation is not none %}
       {% do drop_relation(old_tmp_relation) %}
     {% endif %}

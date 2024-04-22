@@ -12,7 +12,7 @@
 {% endmacro %}
 
 {% macro drop_relation_glue(relation) -%}
-  {%- do log('Dropping relation via Glue and S3 APIs') -%}
+  {%- do log('Dropping relation via Glue and S3 APIs' ~ relation, info=True) -%}
   {%- do adapter.clean_up_table(relation) -%}
   {%- do adapter.delete_from_glue_catalog(relation) -%}
 {% endmacro %}
