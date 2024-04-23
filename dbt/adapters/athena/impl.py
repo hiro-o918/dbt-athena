@@ -718,6 +718,7 @@ class AthenaAdapter(SQLAdapter):
 
     @available
     def list_relations_without_caching(self, schema_relation: AthenaRelation) -> List[BaseRelation]:
+        LOGGER.info("listing relations without caching is called")
         data_catalog = self._get_data_catalog(schema_relation.database)
         if data_catalog and data_catalog["Type"] != "GLUE":
             # For non-Glue Data Catalogs, use the original Athena query against INFORMATION_SCHEMA approach
@@ -750,7 +751,7 @@ class AthenaAdapter(SQLAdapter):
                 tables = page["TableList"]
                 for table in tables:
                     if "TableType" not in table:
-                        LOGGER.debug(f"Table '{table['Name']}' has no TableType attribute - Ignoring")
+                        LOGGER.info(f"Table '{table['Name']}' has no TableType attribute - Ignoring")
                         continue
                     _type = table["TableType"]
                     _detailed_table_type = table.get("Parameters", {}).get("table_type", "")
@@ -772,7 +773,9 @@ class AthenaAdapter(SQLAdapter):
         except ClientError as e:
             # don't error out when schema doesn't exist
             # this allows dbt to create and manage schemas/databases
-            LOGGER.debug(f"Schema '{schema_relation.schema}' does not exist - Ignoring: {e}")
+            LOGGER.info(f"Schema '{schema_relation.schema}' does not exist - Ignoring: {e}")
+
+        LOGGER.info(f"Found {len(relations)} relations in schema '{schema_relation.database}.{schema_relation.schema}'")
 
         return relations
 
