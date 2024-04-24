@@ -693,28 +693,28 @@ class AthenaAdapter(SQLAdapter):
             info_schema_name_map.add(relation)
         return info_schema_name_map
 
-    def _get_data_catalog(self, database: str) -> Optional[DataCatalogTypeDef]:
-        if database:
-            conn = self.connections.get_thread_connection()
-            creds = conn.credentials
-            client = conn.handle
-            if database.lower() == "awsdatacatalog":
-                with boto3_client_lock:
-                    sts = client.session.client(
-                        "sts",
-                        region_name=client.region_name,
-                        config=get_boto3_config(num_retries=creds.effective_num_retries),
-                    )
-                catalog_id = sts.get_caller_identity()["Account"]
-                return {"Name": database, "Type": "GLUE", "Parameters": {"catalog-id": catalog_id}}
+    def _get_data_catalog(self, database: str | None) -> DataCatalogTypeDef | None:
+        if not database:
+            return None
+        conn = self.connections.get_thread_connection()
+        creds = conn.credentials
+        client = conn.handle
+        if database.lower() == "awsdatacatalog":
             with boto3_client_lock:
-                athena = client.session.client(
-                    "athena",
+                sts = client.session.client(
+                    "sts",
                     region_name=client.region_name,
                     config=get_boto3_config(num_retries=creds.effective_num_retries),
                 )
-            return athena.get_data_catalog(Name=database)["DataCatalog"]
-        return None
+            catalog_id = sts.get_caller_identity()["Account"]
+            return {"Name": database, "Type": "GLUE", "Parameters": {"catalog-id": catalog_id}}
+        with boto3_client_lock:
+            athena = client.session.client(
+                "athena",
+                region_name=client.region_name,
+                config=get_boto3_config(num_retries=creds.effective_num_retries),
+            )
+        return athena.get_data_catalog(Name=database)["DataCatalog"]
 
     @available
     def list_relations_without_caching(self, schema_relation: AthenaRelation) -> List[BaseRelation]:
@@ -733,47 +733,49 @@ class AthenaAdapter(SQLAdapter):
                 region_name=client.region_name,
                 config=get_boto3_config(num_retries=creds.effective_num_retries),
             )
-        paginator = glue_client.get_paginator("get_tables")
 
-        kwargs = {
-            "DatabaseName": schema_relation.schema,
-        }
         # If the catalog is `awsdatacatalog` we don't need to pass CatalogId as boto3 infers it from the account Id.
-        if catalog_id := get_catalog_id(data_catalog):
-            kwargs["CatalogId"] = catalog_id
-        page_iterator = paginator.paginate(**kwargs)
-
-        relations = []
-        quote_policy = {"database": True, "schema": True, "identifier": True}
-
+        catalog_id = get_catalog_id(data_catalog)
         try:
-            for page in page_iterator:
-                tables = page["TableList"]
-                for table in tables:
-                    if "TableType" not in table:
-                        LOGGER.info(f"Table '{table['Name']}' has no TableType attribute - Ignoring")
-                        continue
-                    _type = table["TableType"]
-                    _detailed_table_type = table.get("Parameters", {}).get("table_type", "")
-                    if _type == "VIRTUAL_VIEW":
-                        _type = self.Relation.View
-                    else:
-                        _type = self.Relation.Table
-
-                    relations.append(
-                        self.Relation.create(
-                            schema=schema_relation.schema,
-                            database=schema_relation.database,
-                            identifier=table["Name"],
-                            quote_policy=quote_policy,
-                            type=_type,
-                            detailed_table_type=_detailed_table_type,
-                        )
-                    )
+            glue_client.get_database(Name=schema_relation.schema, CatalogId=catalog_id)
         except ClientError as e:
             # don't error out when schema doesn't exist
             # this allows dbt to create and manage schemas/databases
-            LOGGER.info(f"Schema '{schema_relation.schema}' does not exist - Ignoring: {e}")
+            if e.response["Error"]["Code"] == "EntityNotFoundException":
+                return []
+            else:
+                raise e
+
+        paginator = glue_client.get_paginator("get_tables")
+        tables = (
+            paginator.paginate(DatabaseName=schema_relation.schema, CatalogId=catalog_id)
+            .build_full_result()
+            .get("TableList")
+        )
+
+        relations: list[BaseRelation] = []
+        quote_policy = {"database": True, "schema": True, "identifier": True}
+        for table in tables:
+            if "TableType" not in table:
+                LOGGER.info(f"Table '{table['Name']}' has no TableType attribute - Ignoring")
+                continue
+            _type = table["TableType"]
+            _detailed_table_type = table.get("Parameters", {}).get("table_type", "")
+            if _type == "VIRTUAL_VIEW":
+                _type = self.Relation.View
+            else:
+                _type = self.Relation.Table
+
+            relations.append(
+                self.Relation.create(
+                    schema=schema_relation.schema,
+                    database=schema_relation.database,
+                    identifier=table["Name"],
+                    quote_policy=quote_policy,
+                    type=_type,
+                    detailed_table_type=_detailed_table_type,
+                )
+            )
 
         LOGGER.info(f"Found {len(relations)} relations in schema '{schema_relation.database}.{schema_relation.schema}'")
 
